@@ -1,50 +1,33 @@
-# Document Question Answering (2A)
+# SIT Student Policy Advisor (HacktoberFest 2A)
 
-A small Retrieval-Augmented Generation (RAG) app for asking questions about PDF documents. It splits pages into overlapping text chunks, embeds them with `all-MiniLM-L6-v2`, retrieves the closest passages, then asks Google's Gemma model to answer from those passages with page citations.
+A Gradio retrieval-augmented generation app for student policy questions. Upload at least two text-based official PDFs; the app indexes their pages, retrieves relevant passages, and asks Google's Gemma model to answer from those passages with document and page citations.
 
 ## Features
 
-- Upload a text-based PDF or load the included sample syllabus.
-- Retrieve the three most relevant chunks using cosine similarity.
-- Generate concise, document-grounded answers with page citations.
-- Show retrieved passages and similarity scores for transparency.
-- Run in demo mode without an API key; retrieval still works and displays a relevant passage.
+- Upload and index multiple PDFs, with document names and passage counts shown in the status panel.
+- Cite the source PDF and page in answers, and display the retrieved passages and similarity scores.
+- Refuse questions when the best retrieval score is below the configurable MIN_SIMILARITY threshold.
+- Provide a 15-row evaluation worksheet for recording expected answers, app answers, correctness, and failure notes. The worksheet does not claim an accuracy result until the team fills and reviews it.
+- Explain the pipeline and current design settings in the application.
+- Use the black, white, yellow, and orange interface theme.
 
 ## Run locally
 
 1. Install Python 3.10 or newer.
-2. Create and activate a virtual environment, then install dependencies:
+2. Create a virtual environment and install dependencies: python -m venv .venv, activate it, then run pip install -r requirements.txt.
+3. Set GOOGLE_API_KEY in your environment to a Google AI Studio key. Never commit the key. Without it, the app runs in retrieval-only mode and shows passages rather than generated answers.
+4. Start the app with python app.py and open the local URL printed by Gradio. The first run downloads the embedding model.
 
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-   pip install -r requirements.txt
-   ```
+## Pipeline settings
 
-3. Set your Google AI Studio key as an environment variable (never commit it):
+The app reads selectable text from PDFs with pypdf, splits each page into overlapping 120-word chunks with 30 words of overlap, embeds chunks using sentence-transformers/all-MiniLM-L6-v2, and retrieves the top 3 passages by cosine similarity. MIN_SIMILARITY defaults to 0.28 and should be checked against the team's own test set and documents.
 
-   ```bash
-   export GOOGLE_API_KEY="your-key"  # Windows PowerShell: $env:GOOGLE_API_KEY="your-key"
-   ```
-
-   The app can also start without a key in demo mode.
-
-4. Start the app:
-
-   ```bash
-   python app.py
-   ```
-
-Open the local URL printed by Gradio. The first run downloads the embedding model. Scanned/image-only PDFs need OCR before this app can read them.
-
-## Configuration
-
-`GEMMA_MODEL` can optionally override the default `gemma-4-26b-a4b-it` model. Chunk size, overlap, and retrieval count are set near the top of `app.py`.
+Scanned or image-only PDFs need OCR before they can be indexed. The 15-question worksheet starts blank by design: use the documents selected for the showcase, manually verify each answer, and document the main failure cases before reporting accuracy.
 
 ## Security
 
-Keep API keys in environment variables or a local `.env` file that is excluded by `.gitignore`. If a key has ever been committed or shared, revoke it and create a replacement.
+Keep API keys in environment variables or a local .env file excluded by .gitignore. If a key has ever been committed or shared, revoke it and create a replacement. Do not upload private or copyrighted documents to the public repository; upload test PDFs directly in the running app when permitted.
 
 ## Based on
 
-The flow and model choices follow the [HacktoberFest HackDay RAG starter kit](https://github.com/mithun-srinivas/HacktoberFest-HackDay/blob/main/templates/02_rag_starter_kit.ipynb). This repository packages the working 2A PDF-question-answering path as a standalone Gradio app.
+The pipeline and model choices follow the [HacktoberFest HackDay RAG starter kit](https://github.com/mithun-srinivas/HacktoberFest-HackDay/blob/main/templates/02_rag_starter_kit.ipynb).
