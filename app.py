@@ -72,12 +72,10 @@ def build_knowledge_base(file_paths):
         all_chunks.extend(chunks)
     vectors = embedder.encode([chunk["text"] for chunk in all_chunks], normalize_embeddings=True)
     knowledge_base.update(documents=document_names, chunks=all_chunks, vectors=vectors)
-    return (f"### Documents ready
-Indexed **{len(document_names)} PDFs** and **{len(all_chunks)} passages**.
-
-"
-            + "
-".join(f"- {name}" for name in document_names))
+    return (
+        f"### Documents ready\nIndexed **{len(document_names)} PDFs** and **{len(all_chunks)} passages**.\n\n"
+        + "\n".join(f"- {name}" for name in document_names)
+    )
 
 
 def retrieve(question):
@@ -93,9 +91,7 @@ def answer(question):
     found = retrieve(question)
     if not found or found[0]["score"] < MIN_SIMILARITY:
         return REFUSAL, found
-    context = "
-
-".join(
+    context = "\n\n".join(
         f"[Document: {item['document']} | Page: {item['page']}] {item['text']}" for item in found
     )
     if client is None:
@@ -104,10 +100,7 @@ def answer(question):
     else:
         response = client.models.generate_content(
             model=GEMMA_MODEL,
-            contents=f"Context:
-{context}
-
-Question: {question}",
+            contents=f"Context:\n{context}\n\nQuestion: {question}",
             config=types.GenerateContentConfig(system_instruction=ANSWER_RULES, temperature=0.2),
         )
         reply = (response.text or "").strip() or REFUSAL
@@ -120,8 +113,7 @@ def on_upload(file_paths):
             return "Upload at least two official PDFs, then select **Index documents**."
         return build_knowledge_base(file_paths)
     except Exception as exc:
-        return f"### Could not index the documents
-{exc}"
+        return f"### Could not index the documents\n{exc}"
 
 
 def on_ask(question):
@@ -131,14 +123,8 @@ def on_ask(question):
         return "Upload and index your PDFs first.", "No passages retrieved."
     try:
         reply, found = answer(question.strip())
-        evidence = "
-
----
-
-".join(
-            f"### {item['document']} · page {item['page']} · similarity {item['score']:.2f}
-
-> {item['text']}"
+        evidence = "\n\n---\n\n".join(
+            f"### {item['document']} · page {item['page']} · similarity {item['score']:.2f}\n\n> {item['text']}"
             for item in found
         ) or "No passages were retrieved."
         return reply, evidence
@@ -146,23 +132,95 @@ def on_ask(question):
         return f"The request failed: {exc}", ""
 
 
-def score_evaluation(rows):
-    reviewed = correct = 0
-    for row in rows or []:
-        if not row:
-            continue
-        question = str(row[0] or "").strip()
-        actual = str(row[2] or "").strip() if len(row) > 2 else ""
-        is_correct = row[3] if len(row) > 3 else None
-        if question and actual:
-            reviewed += 1
-            if is_correct is True or str(is_correct).strip().lower() in {"true", "yes", "1"}:
-                correct += 1
-    return (f"### Evaluation status
-Reviewed **{reviewed}/15** questions. **{correct}/15 correct "
-            f"({100 * correct / 15:.1f}%)** using the full 15-question denominator. "
-            "Treat the score as final only after all 15 rows have been reviewed.")
+EVALUATION_QUESTIONS = [
+    "What is the annual tuition fee?",
+    "How many tuition installments are available?",
+    "When is the first tuition installment due?",
+    "When is the second tuition installment due?",
+    "What late fee applies to overdue tuition?",
+    "What scholarships and eligibility conditions are listed?",
+    "What key dates appear in the academic calendar?",
+    "What is the application fee?",
+    "What attendance requirement applies to exam eligibility?",
+    "What should a student do after missing an examination?",
+    "What grading scale is specified?",
+    "How can a student request re-evaluation, and by when?",
+    "How should a student raise a grievance?",
+    "What examination conduct rules are stated?",
+    "Who won the 2022 FIFA World Cup?",
+]
 
+
+def initial_evaluation_rows():
+    return [[question, "", "", "Pending", ""] for question in EVALUATION_QUESTIONS]
+
+
+def generate_evaluation_answers(rows):
+    """Generate answers and citations, leaving correctness for human review."""
+    if knowledge_base["vectors"] is None:
+        return rows, "Index at least two PDFs before generating evaluation answers."
+    updated = []
+    for row in rows or []:
+        values = list(row or []) + [""] * (5 - len(row or []))
+        question, expected, app_answer, verdict, notes = [
+            str(value or "") for value in values[:5]
+        ]
+        if question.strip() and not app_answer.strip():
+            reply, found = answer(question.strip())
+            evidence = "\n".join(
+                f"Retrieved: {item['document']}, p. {item['page']} "
+                f"(similarity {item['score']:.2f}) — {item['text']}"
+                for item in found
+            )
+            app_answer = reply + (f"\n\n{evidence}" if evidence else "")
+        updated.append([question, expected, app_answer, verdict or "Pending", notes])
+    return updated, (
+        "Generated answers where possible. Add expected answers from the PDFs, "
+        "inspect each answer and its retrieved evidence, then mark Correct? Yes or No. "
+        "Record a failure note for every No."
+    )
+
+
+def score_evaluation(rows):
+    """Report accuracy only after 15 answers have been reviewed against gold answers."""
+    rows = rows or []
+    pending = []
+    reviewed = []
+    for index, row in enumerate(rows[:15], start=1):
+        values = list(row or []) + [""] * (5 - len(row or []))
+        question, expected, actual, verdict, notes = [
+            str(value or "").strip() for value in values[:5]
+        ]
+        verdict_key = verdict.casefold()
+        if (
+            not question
+            or not expected
+            or not actual
+            or verdict_key not in {"yes", "no"}
+            or (verdict_key == "no" and not notes)
+        ):
+            pending.append(index)
+        else:
+            reviewed.append((question, verdict_key == "yes", notes))
+
+    if len(rows) != 15 or pending:
+        return (
+            f"### Evaluation pending\nReviewed **{len(reviewed)}/15** questions. "
+            "Complete expected answers, app answers, human correctness decisions, "
+            "and failure notes for every incorrect answer before reporting accuracy."
+        )
+
+    correct = sum(is_correct for _, is_correct, _ in reviewed)
+    failures = [
+        f"- {question}: {note}"
+        for question, is_correct, note in reviewed
+        if not is_correct
+    ]
+    return (
+        f"### Reviewed evaluation\n**{correct}/15 correct "
+        f"({correct / 15 * 100:.1f}%).**\n\nFailure cases:\n"
+        + ("\n".join(failures) if failures else "No failures recorded.")
+    )
 
 with gr.Blocks(title="SIT Student Policy Advisor",
                theme=gr.themes.Soft(primary_hue="amber", secondary_hue="orange", neutral_hue="slate")) as demo:
@@ -193,11 +251,13 @@ with gr.Blocks(title="SIT Student Policy Advisor",
         with gr.Tab("15-question evaluation"):
             gr.Markdown("""## Evaluation worksheet
 Create a document-specific set of 15 questions. Enter the expected answer and the app's answer, then mark each result. Include an unsupported question to review refusal behavior. The app does not invent a score.""")
-            eval_rows = [[f"Question {i}", "", "", None, ""] for i in range(1, 16)]
-            eval_table = gr.Dataframe(value=eval_rows, headers=["Question", "Expected answer", "App answer", "Correct?", "Failure notes"], datatype=["str", "str", "str", "bool", "str"], interactive=True, wrap=True)
-            eval_button = gr.Button("Calculate accuracy", variant="primary")
-            eval_result = gr.Markdown("Complete and review the worksheet to calculate a result.")
-            eval_button.click(score_evaluation, inputs=eval_table, outputs=eval_result)
+            eval_table = gr.Dataframe(value=initial_evaluation_rows(), headers=["Question", "Expected answer (from PDF)", "App answer and retrieved evidence", "Correct? (Yes/No)", "Failure notes (required for No)"], datatype=["str", "str", "str", "str", "str"], interactive=True, wrap=True)
+            with gr.Row():
+                generate_eval_button = gr.Button("Generate app answers", variant="primary")
+                score_eval_button = gr.Button("Calculate reviewed accuracy")
+            eval_result = gr.Markdown("Evaluation pending: fill expected answers from the PDFs, generate responses, and review all 15 rows.")
+            generate_eval_button.click(generate_evaluation_answers, inputs=eval_table, outputs=[eval_table, eval_result])
+            score_eval_button.click(score_evaluation, inputs=eval_table, outputs=eval_result)
         with gr.Tab("How it works"):
             gr.Markdown("""## Pipeline and design choices
 1. Read selectable text from each uploaded PDF and preserve its filename and page number.

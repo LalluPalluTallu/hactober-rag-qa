@@ -31,3 +31,17 @@ Keep API keys in environment variables or a local .env file excluded by .gitigno
 ## Based on
 
 The pipeline and model choices follow the [HacktoberFest HackDay RAG starter kit](https://github.com/mithun-srinivas/HacktoberFest-HackDay/blob/main/templates/02_rag_starter_kit.ipynb).
+
+## Colab notebook
+
+The adapted notebook is available at [Copy_of_02_rag_starter_kit.ipynb](Copy_of_02_rag_starter_kit.ipynb). It includes the same two-PDF flow and a review-gated evaluation worksheet.
+
+## Before the showcase
+
+- Bring at least two official, text-based documents for the selected campus policy use case and index them in the app.
+- Replace or adapt the 15 starter questions so they match those documents. Write each expected answer from its cited source before evaluating.
+- Generate the app answers, inspect the citations and retrieved passages, then manually mark each answer correct or incorrect. Add a failure note for every incorrect answer.
+- Report accuracy only after all 15 answers have been reviewed. The threshold experiment measures answer-versus-refusal routing; it is not a factual answer-accuracy score.
+- Explain the chunk size, overlap, top-k and relevance threshold used in the demo.
+
+The repository intentionally does not include the PDFs or API key. Upload documents to the running app when you are authorized to use them, and keep the key in a local environment variable or Colab secret.
